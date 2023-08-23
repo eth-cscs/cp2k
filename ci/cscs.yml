@@ -4,7 +4,7 @@ include:
 stages:
   - build_base
   - build
-    #  - test
+  - test
 
 build fedora base image:
   extends: .container-builder
@@ -146,24 +146,26 @@ build ubuntu-openmpi-cpu image:
     SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib  +enable_regtests +mpi +openmp +cosma ^intel-oneapi-mkl+cluster ^openmpi ^dbcsr+mpi+openmp~shared ^cosma+scalapack+shared'
     DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
 
-# .run_tests_cuda:
-#    extends: .container-runner-hohgant-gpu
-#    needs: ["build cuda image"]
-#    stage: test
-#    script:
-#      - cd /cp2k
-#      - ${TEST_COMMAND}
-#    image: $CSCS_REGISTRY_PATH/sirius/cp2k-ci-cuda-ubuntu:$CI_COMMIT_SHA
-#    variables:
-#      GIT_STRATEGY: none
-#      MPICH_MAX_THREAD_SAFETY: multiple
-#      CSCS_REGISTRY_LOGIN: 'YES'
-#      PULL_IMAGE: 'YES'
-#      SLURM_HINT: nomultithread
-#      SLURM_JOB_NUM_NODES: 1
-#      SLURM_UNBUFFEREDIO: ''
-#      SLURM_WAIT: 0
-# 
+gpu cuda:
+    extends: .container-runner-hohgant-a100
+    needs: ["build ubuntu-mpich-gpu"]
+    stage: test
+    script:
+      - cd /cp2k/benchmarks/QS
+      - ../../exe/cmake_build_cuda/cp2k.psmp H2O-32.psmp
+    image: $CSCS_REGISTRY_PATH/sirius/cp2k-ci-cuda-ubuntu:$CI_COMMIT_SHA
+    variables:
+      GIT_STRATEGY: none
+      MPICH_MAX_THREAD_SAFETY: multiple
+      CSCS_REGISTRY_LOGIN: 'YES'
+      PULL_IMAGE: 'YES'
+      SLURM_HINT: nomultithread
+      SLURM_JOB_NUM_NODES: 16
+      SLURM_UNBUFFEREDIO: ''
+      SLURM_WAIT: 0
+      
+      
+      #TEST_COMMAND: tools/regtesting/do_regtests.py --mpiranks 1 --ompthreads ${OMP_NUM_THREADS} --maxtasks ${SLURM_NUM_TASKS} --num_gpus 4 --workbasedir /tmp/regtests cmake_build_cuda psmp
 #  gpu serial cuda:
 #    extends: .run_tests_cuda
 #    variables:
