@@ -1,0 +1,224 @@
+include:
+  - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
+
+stages:
+  - build_base
+  - build
+  - test
+
+build fedora base image:
+  extends: .container-builder
+  stage: build_base
+  timeout: 4h
+  artifacts:
+    reports:
+      dotenv: build.env
+  variables:
+    #CSCS_BUILD_IN_MEMORY: 'FALSE'
+    DOCKERFILE: ci/baseimage.cpu.Fedora37.Dockerfile
+    # change to 'always' if you want to rebuild, even if target tag exists already (if-not-exists is the default, i.e. we could also skip the variable)
+    CSCS_REBUILD_POLICY: if-not-exists
+    WATCH_FILECHANGES: ci/baseimage.cpu.Fedora37.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-fedora
+    #DOCKER_BUILD_ARGS: '["CUDA_ARCH=60"]'
+
+build ubuntu base image:
+  extends: .container-builder
+  stage: build_base
+  # we create a tag that depends on the SHA value of ci/baseimage.cuda.ubuntu.Dockerfile, this way
+  # a new base image is only built when the SHA of this file changes
+  # If there are more dependency files that should change the tag-name of the base container
+  # image, they can be added too.
+  # Since the base image name is runtime dependent, we need to carry the value of it to
+  # the following jobs via a dotenv file.
+  timeout: 4h
+  artifacts:
+    reports:
+      dotenv: build.env
+  variables:
+    DOCKERFILE: ci/baseimage.ubuntu.Dockerfile
+    # change to 'always' if you want to rebuild, even if target tag exists already (if-not-exists is the default, i.e. we could also skip the variable)
+    CSCS_REBUILD_POLICY: if-not-exists
+    DOCKER_BUILD_ARGS: '[]'
+    WATCH_FILECHANGES: ci/baseimage.ubuntu.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-ubuntu
+
+build cuda base image:
+  extends: .container-builder
+  stage: build_base
+  # we create a tag that depends on the SHA value of ci/baseimage.cuda.ubuntu.Dockerfile, this way
+  # a new base image is only built when the SHA of this file changes
+  # If there are more dependency files that should change the tag-name of the base container
+  # image, they can be added too.
+  # Since the base image name is runtime dependent, we need to carry the value of it to
+  # the following jobs via a dotenv file.
+  timeout: 2h
+  artifacts:
+    reports:
+      dotenv: build.env
+  variables:
+    DOCKERFILE: ci/baseimage.cuda.ubuntu.Dockerfile
+    # change to 'always' if you want to rebuild, even if target tag exists already (if-not-exists is the default, i.e. we could also skip the variable)
+    CSCS_REBUILD_POLICY: if-not-exists
+    DOCKER_BUILD_ARGS: '["CUDA_ARCH=80"]'
+    WATCH_FILECHANGES: ci/baseimage.cuda.ubuntu.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-cuda-ubuntu
+
+build rocm base image:
+  extends: .container-builder
+  stage: build_base
+  # we create a tag that depends on the SHA value of ci/baseimage.cuda.ubuntu.Dockerfile, this way
+  # a new base image is only built when the SHA of this file changes
+  # If there are more dependency files that should change the tag-name of the base container
+  # image, they can be added too.
+  # Since the base image name is runtime dependent, we need to carry the value of it to
+  # the following jobs via a dotenv file.
+  timeout: 4h
+  artifacts:
+    reports:
+      dotenv: build.env
+  variables:
+    DOCKERFILE: ci/baseimage.rocm.ubuntu.Dockerfile
+    # change to 'always' if you want to rebuild, even if target tag exists already (if-not-exists is the default, i.e. we could also skip the variable)
+    CSCS_REBUILD_POLICY: if-not-exists
+    DOCKER_BUILD_ARGS: '["AMDGPU_TARGET=gfx90a"]'
+    WATCH_FILECHANGES: ci/baseimage.rocm.ubuntu.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-rocm-ubuntu
+
+build fedora-mpich-cpu image:
+  extends: .container-builder
+  needs: ["build fedora base image"]
+  stage: build
+variables:
+  DOCKERFILE: ci/build.Dockerfile
+  PERSIST_IMAGE_NAME: discard
+  SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib +enable_regtests +mpi +openmp +cosma ^intel-oneapi-mkl+cluster ^mpich@4.0.3 ^dbcsr+mpi+openmp~shared ^cosma+scalapack+shared'
+  DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+build fedora-openmpi-cpu image:
+  extends: .container-builder
+  needs: ["build fedora base image"]
+  stage: build
+  variables:
+    DOCKERFILE: ci/build.Dockerfile
+    PERSIST_IMAGE_NAME: discard
+    SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib +enable_regtests  +mpi +openmp +cosma ^intel-oneapi-mkl+cluster ^openmpi ^dbcsr+mpi+openmp~shared ^cosma+scalapack+shared'
+    DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+
+build ubuntu-mpich-gpu image:
+  extends: .container-builder
+  needs: ["build cuda base image"]
+  stage: build
+  variables:
+    DOCKERFILE: ci/build.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-cuda-ubuntu:$CI_COMMIT_SHA
+    SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib  +enable_regtests +mpi +openmp +cuda cuda_arch=80 +cosma ^intel-oneapi-mkl+cluster ^mpich@4.0.3 ^cosma+scalapack+shared+cuda~apps~tests ^dbcsr+cuda~shared+mpi+openmp cuda_arch=80'
+    DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+build ubuntu-mpich-rocm image:
+  extends: .container-builder
+  needs: ["build rocm base image"]
+  stage: build
+  variables:
+    DOCKERFILE: ci/build.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-rocm-ubuntu:$CI_COMMIT_SHA
+    SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib  +enable_regtests +mpi +openmp +rocm amdgpu_target=gfx90a +cosma ^intel-oneapi-mkl+cluster ^mpich@4.0.3 ^cosma+scalapack+shared+rocm~apps~tests ^dbcsr@2.6.0+rocm~shared+mpi+openmp amdgpu_target=gfx90a'
+    DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+build ubuntu-mpich-cpu image:
+  extends: .container-builder
+  needs: ["build ubuntu base image"]
+  stage: build
+  variables:
+    DOCKERFILE: ci/build.Dockerfile
+    PERSIST_IMAGE_NAME: $CSCS_REGISTRY_PATH/base/cp2k-ci-ubuntu:$CI_COMMIT_SHA
+    SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib  +enable_regtests +mpi +openmp +cosma ^intel-oneapi-mkl+cluster ^mpich@4.0.3 ^dbcsr+mpi+openmp~shared ^cosma+scalapack+shared'
+    DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+build ubuntu-openmpi-cpu image:
+  extends: .container-builder
+  needs: ["build ubuntu base image"]
+  stage: build
+  variables:
+    DOCKERFILE: ci/build.Dockerfile
+    PERSIST_IMAGE_NAME: discard
+    SPEC: 'cp2k@master%gcc +libxc +libint smm=libxsmm +spglib  +enable_regtests +mpi +openmp +cosma ^intel-oneapi-mkl+cluster ^openmpi ^dbcsr+mpi+openmp~shared ^cosma+scalapack+shared'
+    DOCKER_BUILD_ARGS: '["BASE_IMAGE=${BASE_IMAGE}", "SPECDEV=$SPEC", "CMAKE_ARG=$CMAKE_ARG"]'
+
+gpu cuda:
+    extends: .container-runner-hohgant-a100
+    needs: ["build ubuntu-mpich-gpu"]
+    stage: test
+    script:
+      - cd /cp2k/benchmarks/QS
+      - ../../exe/cmake_build_cuda/cp2k.psmp H2O-32.psmp
+    image: $CSCS_REGISTRY_PATH/sirius/cp2k-ci-cuda-ubuntu:$CI_COMMIT_SHA
+    variables:
+      GIT_STRATEGY: none
+      MPICH_MAX_THREAD_SAFETY: multiple
+      CSCS_REGISTRY_LOGIN: 'YES'
+      PULL_IMAGE: 'YES'
+      SLURM_HINT: nomultithread
+      SLURM_JOB_NUM_NODES: 16
+      SLURM_UNBUFFEREDIO: ''
+      SLURM_WAIT: 0
+      
+      
+      #TEST_COMMAND: tools/regtesting/do_regtests.py --mpiranks 1 --ompthreads ${OMP_NUM_THREADS} --maxtasks ${SLURM_NUM_TASKS} --num_gpus 4 --workbasedir /tmp/regtests cmake_build_cuda psmp
+#  gpu serial cuda:
+#    extends: .run_tests_cuda
+#    variables:
+#      OMP_NUM_THREADS: 4
+#      CRAY_CUDA_MPS: 1
+#      SLURM_CONSTRAINT: gpu
+#      SLURM_CPUS_PER_TASK: 4
+#      SLURM_NTASKS: 4
+#      SLURM_PARTITION: nvgpu
+#      SLURM_TIMELIMIT: "30:00"
+#      TEST_COMMAND: tools/regtesting/do_regtests.py --mpiranks 1 --ompthreads ${OMP_NUM_THREADS} --maxtasks ${SLURM_NUM_TASKS} --num_gpus 4 --workbasedir /tmp/regtests cmake_build_cuda psmp
+
+# gpu band parallel:
+#   extends: .run_tests
+#   variables:
+#     OMP_NUM_THREADS: 3
+#     SLURM_CONSTRAINT: gpu
+#     SLURM_CPUS_PER_TASK: 3
+#     SLURM_NTASKS: 4
+#     SLURM_TIMELIMIT: "30:00"
+#     TEST_COMMAND: ctest -L gpu_band_parallel
+#     USE_MPI: 'YES'
+
+# gpu k-point parallel:
+#   extends: .run_tests
+#   variables:
+#     OMP_NUM_THREADS: 3
+#     SLURM_CONSTRAINT: gpu
+#     SLURM_CPUS_PER_TASK: 3
+#     SLURM_NTASKS: 4
+#     SLURM_TIMELIMIT: "30:00"
+#     TEST_COMMAND: ctest -L gpu_k_point_parallel
+#     USE_MPI: 'YES'
+
+# cpu single:
+#   extends: .run_tests
+#   variables:
+#     OMP_NUM_THREADS: 12
+#     SLURM_CONSTRAINT: gpu
+#     SLURM_CPU_BIND: sockets
+#     SLURM_CPUS_PER_TASK: 12
+#     SLURM_NTASKS: 1
+#     SLURM_TIMELIMIT: "30:00"
+#     TEST_COMMAND: ctest -L cpu_serial
+
+# cpu band parallel:
+#   extends: .run_tests
+#   variables:
+#     OMP_NUM_THREADS: 3
+#     SLURM_CONSTRAINT: gpu
+#     SLURM_CPU_BIND: sockets
+#     SLURM_CPUS_PER_TASK: 3
+#     SLURM_NTASKS: 4
+#     SLURM_TIMELIMIT: "30:00"
+#     TEST_COMMAND: ctest -L cpu_band_parallel
+#     USE_MPI: 'YES'
